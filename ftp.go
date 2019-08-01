@@ -11,12 +11,32 @@ import (
 )
 
 func main() {
-	connect := connect()
-	pathRoot := "/fcs_regions"
-	from, _ := time.Parse("2006-01-02 15:04:05", "2019-08-01 00:00:00")
-	to, _ := time.Parse("2006-01-02 15:04:05", "2019-08-01 16:00:00")
-	var allSize int64
-	var quantityFiles int32
+	// Переменные необходимые для функции recReadAllFiles
+	//connect := connect()
+	//pathRoot := "/fcs_regions/Moskva/notifications"
+	//from, _ := time.Parse("2006-01-02 15:04:05", "2019-08-01 00:00:00")
+	//to, _ := time.Parse("2006-01-02 15:04:05", "2019-08-01 16:00:00")
+	//var allSize int64
+	//var quantityFiles int32
+}
+
+func connect() *goftp.Client {
+	config := goftp.Config{
+		User:               "free",
+		Password:           "free",
+		ConnectionsPerHost: 10,
+		Timeout:            2000 * time.Second,
+		Logger:             os.Stderr,
+	}
+	ftp, err := goftp.DialConfig(config, "ftp.zakupki.gov.ru:21")
+	if err != nil {
+		_ = fmt.Errorf("Блок - 1 %v", err)
+	}
+	return ftp
+}
+
+//Функция для рекурсивного перебора
+func recReadAllFiles(pathRoot string, connect *goftp.Client, from time.Time, to time.Time, quantityFiles int32, allSize int64) {
 	err := Walk(connect, pathRoot, func(fullPath string, info os.FileInfo, err error) error {
 		if err != nil {
 			// no permissions is okay, keep walking
@@ -36,21 +56,6 @@ func main() {
 	}
 	fmt.Println("Общий размер файлов: ", allSize)
 	fmt.Printf("Кол-во файлов за период с %v по %v составляет: %v \n", from.Format("2006-01-02"), to.Format("2006-01-02"), quantityFiles)
-}
-
-func connect() *goftp.Client {
-	config := goftp.Config{
-		User:               "free",
-		Password:           "free",
-		ConnectionsPerHost: 10,
-		Timeout:            2000 * time.Second,
-		Logger:             os.Stderr,
-	}
-	ftp, err := goftp.DialConfig(config, "ftp.zakupki.gov.ru:21")
-	if err != nil {
-		_ = fmt.Errorf("Блок - 1 %v", err)
-	}
-	return ftp
 }
 
 func Walk(client *goftp.Client, root string, walkFn filepath.WalkFunc, from time.Time, to time.Time) (ret error) {
