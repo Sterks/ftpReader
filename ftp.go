@@ -13,22 +13,29 @@ import (
 func main() {
 	connect := connect()
 	pathRoot := "/fcs_regions"
-	//recFiles(connect, pathRoot)
-	from, _ := time.Parse("2006-01-02 15:04:05", "2019-03-01 00:00:00")
-	to, _ := time.Parse("2006-01-02 15:04:05", "2019-04-10 00:00:00")
-	_ = Walk(connect, pathRoot, func(fullPath string, info os.FileInfo, err error) error {
+	from, _ := time.Parse("2006-01-02 15:04:05", "2019-08-01 00:00:00")
+	to, _ := time.Parse("2006-01-02 15:04:05", "2019-08-01 16:00:00")
+	var allSize int64
+	var quantityFiles int32
+	err := Walk(connect, pathRoot, func(fullPath string, info os.FileInfo, err error) error {
 		if err != nil {
 			// no permissions is okay, keep walking
 			if err.(goftp.Error).Code() == 550 {
 				return nil
 			}
+			_ = fmt.Errorf("%v", err)
 			return err
 		}
-
-		fmt.Println(info.ModTime())
-
+		allSize = allSize + info.Size()
+		quantityFiles++
+		fmt.Printf("%v | %v | %v \n", fullPath, info.Size(), info.ModTime())
 		return nil
 	}, from, to)
+	if err != nil {
+		_ = fmt.Errorf("%v", err)
+	}
+	fmt.Println("Общий размер файлов: ", allSize)
+	fmt.Printf("Кол-во файлов за период с %v по %v составляет: %v \n", from.Format("2006-01-02"), to.Format("2006-01-02"), quantityFiles)
 }
 
 func connect() *goftp.Client {
@@ -36,30 +43,14 @@ func connect() *goftp.Client {
 		User:               "free",
 		Password:           "free",
 		ConnectionsPerHost: 10,
-		Timeout:            10 * time.Second,
+		Timeout:            2000 * time.Second,
+		Logger:             os.Stderr,
 	}
 	ftp, err := goftp.DialConfig(config, "ftp.zakupki.gov.ru:21")
 	if err != nil {
 		_ = fmt.Errorf("Блок - 1 %v", err)
 	}
 	return ftp
-}
-
-func recFiles(connect *goftp.Client, path string) {
-
-	list, err := connect.ReadDir(path)
-	if err != nil {
-		_ = fmt.Errorf("recFiles %v", err)
-	}
-	for _, value := range list {
-		if value.IsDir() == false {
-			from, _ := time.Parse("2006-01-02 15:04:05", "2019-03-01 00:00:00")
-			to, _ := time.Parse("2006-01-02 15:04:05", "2019-04-10 00:00:00")
-			if value.ModTime().After(from) && value.ModTime().Before(to) {
-
-			}
-		}
-	}
 }
 
 func Walk(client *goftp.Client, root string, walkFn filepath.WalkFunc, from time.Time, to time.Time) (ret error) {
