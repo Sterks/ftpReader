@@ -12,8 +12,10 @@ import (
 
 func main() {
 	connect := connect()
-	pathRoot := "/fcs_regions/Moskva/notifications"
+	pathRoot := "/fcs_regions"
 	//recFiles(connect, pathRoot)
+	from, _ := time.Parse("2006-01-02 15:04:05", "2019-03-01 00:00:00")
+	to, _ := time.Parse("2006-01-02 15:04:05", "2019-04-10 00:00:00")
 	_ = Walk(connect, pathRoot, func(fullPath string, info os.FileInfo, err error) error {
 		if err != nil {
 			// no permissions is okay, keep walking
@@ -23,10 +25,10 @@ func main() {
 			return err
 		}
 
-		fmt.Println(info.Name(), info.Size(), fullPath)
+		fmt.Println(info.ModTime())
 
 		return nil
-	})
+	}, from, to)
 }
 
 func connect() *goftp.Client {
@@ -59,7 +61,8 @@ func recFiles(connect *goftp.Client, path string) {
 		}
 	}
 }
-func Walk(client *goftp.Client, root string, walkFn filepath.WalkFunc) (ret error) {
+
+func Walk(client *goftp.Client, root string, walkFn filepath.WalkFunc, from time.Time, to time.Time) (ret error) {
 	dirsToCheck := make(chan string, 100)
 
 	var workCount int32 = 1
@@ -78,13 +81,15 @@ func Walk(client *goftp.Client, root string, walkFn filepath.WalkFunc) (ret erro
 			}
 
 			for _, file := range files {
-				if err = walkFn(path.Join(dir, file.Name()), file, nil); err != nil {
-					if file.IsDir() && err == filepath.SkipDir {
-						continue
+				if file.ModTime().After(from) && file.ModTime().Before(to) {
+					if err = walkFn(path.Join(dir, file.Name()), file, nil); err != nil {
+						if file.IsDir() && err == filepath.SkipDir {
+							continue
+						}
+						ret = err
+						close(dirsToCheck)
+						return
 					}
-					ret = err
-					close(dirsToCheck)
-					return
 				}
 
 				if file.IsDir() {
