@@ -6,27 +6,31 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"sync/atomic"
 	"time"
 )
 
 func main() {
 	// Переменные необходимые для функции recReadAllFiles
-	//connect := connect()
+	connect := connect()
 	//pathRoot := "/fcs_regions/Moskva/notifications"
-	//from, _ := time.Parse("2006-01-02 15:04:05", "2019-08-01 00:00:00")
-	//to, _ := time.Parse("2006-01-02 15:04:05", "2019-08-01 16:00:00")
-	//var allSize int64
-	//var quantityFiles int32
+	from, _ := time.Parse("2006-01-02 15:04:05", "2019-08-01 00:00:00")
+	to, _ := time.Parse("2006-01-02 15:04:05", "2019-08-01 16:00:00")
+	var allSize int64
+	var quantityFiles int32
+	var countFiles int
+	readNotification44(connect, from, to, quantityFiles, allSize, countFiles)
+	_, _ = fmt.Scanln()
 }
-
+// Соединение с сервером
 func connect() *goftp.Client {
 	config := goftp.Config{
 		User:               "free",
 		Password:           "free",
 		ConnectionsPerHost: 10,
 		Timeout:            2000 * time.Second,
-		Logger:             os.Stderr,
+		//Logger:             os.Stderr,
 	}
 	ftp, err := goftp.DialConfig(config, "ftp.zakupki.gov.ru:21")
 	if err != nil {
@@ -35,8 +39,39 @@ func connect() *goftp.Client {
 	return ftp
 }
 
+func readNotification44(connect *goftp.Client, from time.Time, to time.Time, quantityFiles int32, allSize int64, countFiles int){
+	pathRoot := "/fcs_regions"
+	listFolder := readFolder(connect , pathRoot)
+	for _, value := range listFolder {
+		nameFolder := value.Name()
+		listPath := pathRoot + "/" + nameFolder + "/notifications"
+		go func(listPath string) {
+			recReadAllFiles(listPath, connect, from, to, quantityFiles, allSize, true, countFiles)
+		}(listPath)
+	}
+	_, _ = fmt.Scanln()
+	fmt.Println("The End")
+}
+
+//Получение директорий первого уровня
+func readFolder(connect *goftp.Client, pathRoot string) [] os.FileInfo{
+
+	listFiles, err := connect.ReadDir(pathRoot)
+	var folder [] os.FileInfo
+	if err != nil {
+		_ = fmt.Errorf("Ошибка в функции ReadDir - %v", err)
+	}
+
+	for _, value := range listFiles {
+		if value.IsDir() == true {
+			folder = append(folder, value)
+		}
+	}
+	return folder
+}
+
 //Функция для рекурсивного перебора
-func recReadAllFiles(pathRoot string, connect *goftp.Client, from time.Time, to time.Time, quantityFiles int32, allSize int64) {
+func recReadAllFiles(pathRoot string, connect *goftp.Client, from time.Time, to time.Time, quantityFiles int32, allSize int64, downloadFile bool, countFiles int) {
 	err := Walk(connect, pathRoot, func(fullPath string, info os.FileInfo, err error) error {
 		if err != nil {
 			// no permissions is okay, keep walking
@@ -48,16 +83,24 @@ func recReadAllFiles(pathRoot string, connect *goftp.Client, from time.Time, to 
 		}
 		allSize = allSize + info.Size()
 		quantityFiles++
-		fmt.Printf("%v | %v | %v \n", fullPath, info.Size(), info.ModTime())
+		countFiles++
+		if downloadFile == true {
+			destFile, _ := os.Create("./Files" + "/" + strconv.Itoa(countFiles) + "/" + info.Name())
+			_ = connect.Retrieve(fullPath, destFile)
+		}
 		return nil
 	}, from, to)
 	if err != nil {
 		_ = fmt.Errorf("%v", err)
 	}
+
+	fmt.Println(pathRoot)
 	fmt.Println("Общий размер файлов: ", allSize)
 	fmt.Printf("Кол-во файлов за период с %v по %v составляет: %v \n", from.Format("2006-01-02"), to.Format("2006-01-02"), quantityFiles)
+	fmt.Println("----------------------")
 }
 
+//Общая функция для обработки файлов
 func Walk(client *goftp.Client, root string, walkFn filepath.WalkFunc, from time.Time, to time.Time) (ret error) {
 	dirsToCheck := make(chan string, 100)
 
