@@ -6,7 +6,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strconv"
 	"sync/atomic"
 	"time"
 )
@@ -15,8 +14,14 @@ func main() {
 	// Переменные необходимые для функции recReadAllFiles
 	connect := connect()
 	//pathRoot := "/fcs_regions/Moskva/notifications"
-	from, _ := time.Parse("2006-01-02 15:04:05", "2019-08-01 00:00:00")
-	to, _ := time.Parse("2006-01-02 15:04:05", "2019-08-01 16:00:00")
+	//from, _ := time.Parse("2006-01-02 15:04:05", "2019-08-06 00:00:00")
+	//to, _ := time.Parse("2006-01-02 15:04:05", "2019-08-06 23:59:59")
+	now := time.Now()
+	y, m, d := now.Date()
+	from := time.Date(y, m, d, 0, 0, 0, 0, now.Location())
+
+	to := time.Now()
+	fmt.Printf( "%v | %v", from, to )
 	var allSize int64
 	var quantityFiles int32
 	var countFiles int
@@ -39,6 +44,7 @@ func connect() *goftp.Client {
 	return ftp
 }
 
+//Извещения по 44 с загрузкой
 func readNotification44(connect *goftp.Client, from time.Time, to time.Time, quantityFiles int32, allSize int64, countFiles int){
 	pathRoot := "/fcs_regions"
 	listFolder := readFolder(connect , pathRoot)
@@ -49,8 +55,6 @@ func readNotification44(connect *goftp.Client, from time.Time, to time.Time, qua
 			recReadAllFiles(listPath, connect, from, to, quantityFiles, allSize, true, countFiles)
 		}(listPath)
 	}
-	_, _ = fmt.Scanln()
-	fmt.Println("The End")
 }
 
 //Получение директорий первого уровня
@@ -84,8 +88,10 @@ func recReadAllFiles(pathRoot string, connect *goftp.Client, from time.Time, to 
 		allSize = allSize + info.Size()
 		quantityFiles++
 		countFiles++
-		if downloadFile == true {
-			destFile, _ := os.Create("./Files" + "/" + strconv.Itoa(countFiles) + "/" + info.Name())
+		if downloadFile == true && info.IsDir() == false {
+			dateFolder := time.Now().Format("2006-01-02")
+			_ = os.MkdirAll("./Files/" + dateFolder, 0777)
+			destFile, _ := os.Create("./Files" + "/" + dateFolder + "/" + info.Name())
 			_ = connect.Retrieve(fullPath, destFile)
 		}
 		return nil
@@ -93,7 +99,6 @@ func recReadAllFiles(pathRoot string, connect *goftp.Client, from time.Time, to 
 	if err != nil {
 		_ = fmt.Errorf("%v", err)
 	}
-
 	fmt.Println(pathRoot)
 	fmt.Println("Общий размер файлов: ", allSize)
 	fmt.Printf("Кол-во файлов за период с %v по %v составляет: %v \n", from.Format("2006-01-02"), to.Format("2006-01-02"), quantityFiles)
@@ -103,14 +108,11 @@ func recReadAllFiles(pathRoot string, connect *goftp.Client, from time.Time, to 
 //Общая функция для обработки файлов
 func Walk(client *goftp.Client, root string, walkFn filepath.WalkFunc, from time.Time, to time.Time) (ret error) {
 	dirsToCheck := make(chan string, 100)
-
 	var workCount int32 = 1
 	dirsToCheck <- root
-
 	for dir := range dirsToCheck {
 		go func(dir string) {
 			files, err := client.ReadDir(dir)
-
 			if err != nil {
 				if err = walkFn(dir, nil, err); err != nil && err != filepath.SkipDir {
 					ret = err
@@ -118,7 +120,6 @@ func Walk(client *goftp.Client, root string, walkFn filepath.WalkFunc, from time
 					return
 				}
 			}
-
 			for _, file := range files {
 				if file.ModTime().After(from) && file.ModTime().Before(to) {
 					if err = walkFn(path.Join(dir, file.Name()), file, nil); err != nil {
@@ -136,13 +137,11 @@ func Walk(client *goftp.Client, root string, walkFn filepath.WalkFunc, from time
 					dirsToCheck <- path.Join(dir, file.Name())
 				}
 			}
-
 			atomic.AddInt32(&workCount, -1)
 			if workCount == 0 {
 				close(dirsToCheck)
 			}
 		}(dir)
 	}
-
 	return ret
 }
