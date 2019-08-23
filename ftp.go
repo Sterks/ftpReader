@@ -1,10 +1,13 @@
 package main
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"time"
 
+	_ "github.com/lib/pq"
 	"github.com/secsy/goftp"
 )
 
@@ -20,6 +23,7 @@ type FileInfo struct {
 }
 
 var infoFileMass []FileInfo
+var err error
 
 func main() {
 	now := time.Now()
@@ -27,34 +31,45 @@ func main() {
 	from := time.Date(y, m, d, 0, 0, 0, 0, now.Location())
 	to := time.Now()
 	connect := connect()
-	// pathRoot := "/fcs_regions"
+	storeFiles := "./Files"
 	t := readNotification44(connect, infoFileMass, from, to)
+	for _, value := range t {
+		hash, buf := HashFiles(connect, value.filepath, value)
+		if FindHash("dsfsd") == false {
+			//Добавляем в базу
+			NewFileInfo(value.nameFile, value.area, value.filepath, value.size, value.modeTime, hash)
+			//Сохраняем на севрер
+			SaveFiles(storeFiles, value, buf)
+		}
+	}
 	fmt.Println(len(t))
 }
 
-func checkFolder(connect *goftp.Client, infoFileMass []FileInfo, from time.Time, to time.Time, pathRoot string) []FileInfo {
-	var infoFile FileInfo
-	files, _ := connect.ReadDir(pathRoot)
-	for _, value := range files {
-		if value.IsDir() == false {
-			if value.ModTime().After(from) && value.ModTime().Before(to) {
-				fullpathFile := pathRoot + "/" + value.Name()
-				fmt.Println(fullpathFile)
-				infoFile.nameFile = value.Name()
-				infoFile.filepath = fullpathFile
-				infoFile.size = value.Size()
-				infoFile.checkDir = value.IsDir()
-				infoFile.modeTime = value.ModTime()
-				infoFile.mode = value.Mode()
-				infoFile.sys = value.Sys()
-				infoFileMass = append(infoFileMass, infoFile)
-			}
-		} else {
-			pd := pathRoot + "/" + value.Name()
-			infoFileMass = checkFolder(connect, infoFileMass, from, to, pd)
-		}
-	}
-	return infoFileMass
+func dateTimeNowString() string {
+	t := time.Now().Local()
+	s := t.Format("2006-01-02")
+	return s
+}
+
+// Создание директории
+func (f *FileInfo) createFolder(storeFiles string) string {
+	t := time.Now().Local()
+	s := t.Format("2006-01-02")
+	path := storeFiles + "/" + s
+	os.MkdirAll(path, 0755)
+	return path
+}
+
+// Загрузка файлов
+func (f *FileInfo) download(connect *goftp.Client, value FileInfo, storeFiles string) string {
+	var hasher = md5.New()
+	filename := storeFiles + "/" + value.nameFile
+	fileName, _ := os.Create(filename)
+	defer fileName.Close()
+	//writer := bufio.NewWriter(fileName)
+	hash := fmt.Sprintf("%s %x", filename, hex.EncodeToString(hasher.Sum(nil)))
+	connect.Retrieve(value.filepath, fileName)
+	return hash
 }
 
 func connect() *goftp.Client {
@@ -70,6 +85,32 @@ func connect() *goftp.Client {
 		_ = fmt.Errorf("Блок - 1 %v", err)
 	}
 	return ftp
+}
+
+func checkFolder(connect *goftp.Client, infoFileMass []FileInfo, from time.Time, to time.Time, pathRoot string, rem string) []FileInfo {
+	var infoFile FileInfo
+	files, _ := connect.ReadDir(pathRoot)
+	for _, value := range files {
+		if value.IsDir() == false {
+			if value.ModTime().After(from) && value.ModTime().Before(to) {
+				fullpathFile := pathRoot + "/" + value.Name()
+				fmt.Println(fullpathFile)
+				infoFile.nameFile = value.Name()
+				infoFile.filepath = fullpathFile
+				infoFile.size = value.Size()
+				infoFile.checkDir = value.IsDir()
+				infoFile.modeTime = value.ModTime()
+				infoFile.mode = value.Mode()
+				infoFile.sys = value.Sys()
+				infoFile.area = rem
+				infoFileMass = append(infoFileMass, infoFile)
+			}
+		} else {
+			pd := pathRoot + "/" + value.Name()
+			infoFileMass = checkFolder(connect, infoFileMass, from, to, pd, rem)
+		}
+	}
+	return infoFileMass
 }
 
 //Извещения по 44 с загрузкой
@@ -98,12 +139,11 @@ func readNotification44(connect *goftp.Client, infoFileMass []FileInfo, from tim
 					infoFile.mode = value.Mode()
 					infoFile.sys = value.Sys()
 					infoFile.area = rem.Name()
-					fmt.Println(infoFile)
 					infoFileMass = append(infoFileMass, infoFile)
 				}
 			} else {
 				pd := pathDir + "/" + value.Name()
-				infoFileMass = checkFolder(connect, infoFileMass, from, to, pd)
+				infoFileMass = checkFolder(connect, infoFileMass, from, to, pd, rem.Name())
 			}
 		}
 	}
