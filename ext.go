@@ -15,27 +15,33 @@ import (
 )
 
 //Сохранение файлов на диск
-func SaveFiles(pathSave string, value FileInfo, buf *bytes.Buffer) {
+func SaveFiles(connect *goftp.Client, pathSave string, value FileInfo) {
 	os.MkdirAll(pathSave+"/"+dateTimeNowString(), 0755)
 	pathLocalFile := pathSave + "/" + dateTimeNowString() + "/" + value.nameFile
+	fmt.Println(pathLocalFile)
 	filePath, err := os.Create(pathLocalFile)
 	if err != nil {
 		fmt.Println(err)
 	}
-	_, err = io.Copy(buf, filePath)
+	defer filePath.Close()
+	connect.Retrieve(value.filepath, filePath)
 	if err != nil {
 		fmt.Println(err)
 	}
+
 }
 
 //Определяем Hash файла
-func HashFiles(connect *goftp.Client, pathFile string, value FileInfo) (string, *bytes.Buffer) {
+func HashFiles(connect *goftp.Client, pathFile string, value FileInfo) string {
 	hasher := md5.New()
 	buf := new(bytes.Buffer)
-	connect.Retrieve(pathFile, buf)
+	err = connect.Retrieve(pathFile, buf)
+	if err != nil {
+		fmt.Println(err)
+	}
 	io.Copy(hasher, buf)
 	hash := hex.EncodeToString(hasher.Sum(nil))
-	return hash, buf
+	return hash
 }
 
 //Создание новой записи
@@ -46,7 +52,7 @@ func NewFileInfo(nameFile string, area string, filepath string, size int64, mode
 	}
 	defer db.Close()
 
-	sqlStatement := `insert into "FilesInfo" ("nameFile", "area", "filepath", "size", "modeTime", "hash") values ($1, $2, $3, $4, $5, $6)`
+	sqlStatement := `insert into "FilesInfo" ("namefile", "area", "filepath", "size", "modetime", "hash") values ($1, $2, $3, $4, $5, $6)`
 	_, err = db.Exec(sqlStatement, nameFile, area, filepath, size, modeTime, hash)
 	if err != nil {
 		log.Fatal(err)
@@ -60,15 +66,14 @@ func FindHash(hash string) bool {
 		log.Fatal(err)
 	}
 	defer db.Close()
-	var fi_id int64
-	e := db.QueryRow(`select "file_id" from "FilesInfo" where "hash" = $1`, hash).Scan(&fi_id)
-	if e != nil {
-		fmt.Println(e)
-	}
-	if fi_id > 0 {
+	var fiID int64
+	_ = db.QueryRow(`select "file_id" from "FilesInfo" where "hash" = $1`, hash).Scan(&fiID)
+
+	if fiID > 0 {
 		return true
+	} else {
+		return false
 	}
-	return false
 }
 
 func ListIndex() {

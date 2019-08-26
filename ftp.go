@@ -34,12 +34,11 @@ func main() {
 	storeFiles := "./Files"
 	t := readNotification44(connect, infoFileMass, from, to)
 	for _, value := range t {
-		hash, buf := HashFiles(connect, value.filepath, value)
-		if FindHash("dsfsd") == false {
-			//Добавляем в базу
+		hash := HashFiles(connect, value.filepath, value)
+		if FindHash(hash) == false {
 			NewFileInfo(value.nameFile, value.area, value.filepath, value.size, value.modeTime, hash)
-			//Сохраняем на севрер
-			SaveFiles(storeFiles, value, buf)
+			SaveFiles(connect, storeFiles, value)
+			fmt.Printf("%s - %d - %s\n", hash, value.size, value.filepath)
 		}
 	}
 	fmt.Println(len(t))
