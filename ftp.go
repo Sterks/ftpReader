@@ -32,16 +32,24 @@ func main() {
 	to := time.Now()
 	connect := connect()
 	storeFiles := "./Files"
+	var saveFile bool
 	t := readNotification44(connect, infoFileMass, from, to)
 	for _, value := range t {
 		hash := HashFiles(connect, value.filepath, value)
-		if FindHash(hash) == false {
-			NewFileInfo(value.nameFile, value.area, value.filepath, value.size, value.modeTime, hash)
+		res := FindHash(hash)
+		if res == false {
+			saveFile = true
+			NewFileInfo(value, hash, saveFile)
 			SaveFiles(connect, storeFiles, value)
 			fmt.Printf("%s - %d - %s\n", hash, value.size, value.filepath)
+		} else {
+			saveFile = false
+			NewFileInfo(value, hash, saveFile)
+			fmt.Printf("Запись в базе уже существует - %s - %s - %d\n", value.filepath, hash, value.size)
 		}
 	}
 	fmt.Println(len(t))
+	// UnArchive()
 }
 
 func dateTimeNowString() string {
