@@ -1,10 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"crypto/md5"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
+	"log"
 	"os"
+	"path"
+	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -28,57 +35,187 @@ type FileInfo struct {
 	localFilePath string
 }
 
-var infoFileMass []FileInfo
 var err error
 
 func main() {
+	// gocron.Every().Minute().Do(mainProccess)
+	// <-gocron.Start()
+	mainProccess()
+}
+
+func mainProccess() {
+	var infoFileMass []FileInfo
+	fmt.Println("Запуск программы ...")
+	start := time.Now()
+	client := connect()
+
 	now := time.Now()
 	y, m, d := now.Date()
 	from := time.Date(y, m, d, 0, 0, 0, 0, now.Location())
 	to := time.Now()
-	connect := connect()
-	storeFiles := "./Files"
-	var saveFile bool
-	t := readNotification44(connect, infoFileMass, from, to)
-	for _, value := range t {
-		hash := HashFiles(connect, value.filepath, value)
-		res := FindHash(hash)
-		if res == false {
-			saveFile = true
-			unarch := "N"
-			localFilePath := SaveFiles(connect, storeFiles, value)
-			value.localFilePath = localFilePath
-			ext := FileExt(localFilePath)
-			NewFileInfo(value, hash, saveFile, ext, unarch)
-			fmt.Printf("%s - %d - %s\n", hash, value.size, value.filepath)
-		} else {
-			unarch := "N"
-			saveFile = false
-			ext := ""
-			NewFileInfo(value, hash, saveFile, ext, unarch)
-			fmt.Printf("Запись в базе уже существует - %s - %s - %d\n", value.filepath, hash, value.size)
-		}
-	}
-	fmt.Println(len(t))
-	listNotOpen := FindNotUnArch()
-	channel := make(chan FileInfo)
-	for _, file := range listNotOpen {
-		dstFolder := "./Open"
-		r, err := UnArchive(file.localFilePath, dstFolder, channel)
-		if err != nil {
-			fmt.Println(err)
-		}
-		for _, value := range r {
-			fmt.Println(value)
-		}
-	}
+	listInfoFiles := GetFiles(client, from, to, "notifications", infoFileMass)
+	fmt.Println(len(listInfoFiles))
+	// for _, value := range infoFileMass {
+	// 	fmt.Println(value.hash, value.modeTime, value.nameFile, value.filepath, value.size)
+	// }
+	fmt.Println(time.Since(start))
+	fmt.Println("Выполнение завершено ...")
 }
 
-func dateTimeNowString() string {
-	t := time.Now().Local()
-	s := t.Format("2006-01-02")
-	return s
+//Извещения по 44
+func GetFiles(client *goftp.Client, from time.Time, to time.Time, typeDocum string, infoFileMass []FileInfo) []FileInfo {
+	rootPath := "/fcs_regions"
+	listFiles, err := client.ReadDir(rootPath)
+	if err != nil {
+		log.Panic(err)
+	}
+	var lister []os.FileInfo
+	for _, value := range listFiles {
+		if value.IsDir() == true {
+			lister = append(lister, value)
+		}
+	}
+	var infoFileMassS []FileInfo
+	for _, value2 := range lister {
+		Walk(client, rootPath+"/"+value2.Name()+"/"+typeDocum, func(fullPath string, info os.FileInfo, err error) error {
+			if err != nil {
+				// no permissions is okay, keep walking
+				if err.(goftp.Error).Code() == 550 {
+					return nil
+				}
+				return err
+			}
+			// go func() {
+			var infoFile FileInfo
+
+			buf := new(bytes.Buffer)
+			err = client.Retrieve(fullPath, buf)
+			var hasher = sha256.New()
+			_, err = io.Copy(hasher, buf)
+			if err != nil {
+				log.Panic(err)
+			}
+			hhh := hex.EncodeToString(hasher.Sum(nil))
+			infoFile.nameFile = info.Name()
+			infoFile.modeTime = info.ModTime()
+			infoFile.size = info.Size()
+			infoFile.hash = hhh
+			infoFile.area = value2.Name()
+			infoFile.filepath = fullPath
+			hash := fmt.Sprintf("%s - %x", fullPath, hasher.Sum(nil))
+			fmt.Println(hash)
+
+			// ch <- infoFile
+
+			infoFileMassS = append(infoFileMassS, infoFile)
+			// }()
+			return nil
+		}, from, to)
+	}
+	fmt.Println(len(infoFileMassS))
+	return infoFileMassS
 }
+
+func Walk(client *goftp.Client, root string, walkFn filepath.WalkFunc, from time.Time, to time.Time) (ret error) {
+	dirsToCheck := make(chan string, 100)
+
+	var workCount int32 = 1
+	dirsToCheck <- root
+
+	for dir := range dirsToCheck {
+		go func(dir string) {
+			files, err := client.ReadDir(dir)
+			if err != nil {
+				if err = walkFn(dir, nil, err); err != nil && err != filepath.SkipDir {
+					ret = err
+					close(dirsToCheck)
+					return
+				}
+			}
+
+			for _, file := range files {
+				if file.ModTime().After(from) && file.ModTime().Before(to) && file.IsDir() == false {
+					if err = walkFn(path.Join(dir, file.Name()), file, nil); err != nil {
+						if file.IsDir() && err == filepath.SkipDir {
+							continue
+						}
+						ret = err
+						close(dirsToCheck)
+						return
+					}
+				}
+
+				if file.IsDir() {
+					atomic.AddInt32(&workCount, 1)
+					dirsToCheck <- path.Join(dir, file.Name())
+				}
+			}
+
+			atomic.AddInt32(&workCount, -1)
+			if workCount == 0 {
+				close(dirsToCheck)
+			}
+		}(dir)
+	}
+
+	return ret
+}
+
+// func main() {
+// 	now := time.Now()
+// 	y, m, d := now.Date()
+// 	from := time.Date(y, m, d, 0, 0, 0, 0, now.Location())
+// 	to := time.Now()
+// 	connect := connect()
+// 	// storeFiles := "./Files"
+// 	// var saveFile bool
+// 	t := readNotification44(connect, infoFileMass, from, to)
+// 	i := 0
+// for _, value := range t {
+// 		// 		hash := HashFiles(connect, value.filepath, value)
+// 		// 		res := FindHash(hash)
+// 		// 		if res == false {
+// 		// 			saveFile = true
+// 		// 			unarch := "N"
+// 		// 			localFilePath := SaveFiles(connect, storeFiles, value)
+// 		// 			value.localFilePath = localFilePath
+// 		// 			ext := FileExt(localFilePath)
+// 		// 			NewFileInfo(value, hash, saveFile, ext, unarch)
+// fmt.Printf("%s - %s\n", value.size, value.filepath)
+// 		// 		} else {
+// 		// 			unarch := "N"
+// 		// 			saveFile = false
+// 		// 			ext := ""
+// 		// 			NewFileInfo(value, hash, saveFile, ext, unarch)
+// 		// 			fmt.Printf("Запись в базе уже существует - %s - %s - %d\n", value.filepath, hash, value.size)
+// 	i++
+// // }
+// fmt.Println(i)
+// 	// 	}
+// 	// 	fmt.Println(len(t))
+// 	// 	listNotOpen := FindNotUnArch()
+// 	// 	channel := make(chan FileInfo)
+// 	// 	for _, file := range listNotOpen {
+// 	// 		dstFolder := "./Open/" + DateTimeNowString()
+// 	// 		r, err := UnArchive(file.localFilePath, dstFolder, channel)
+// 	// 		if err != nil {
+// 	// 			fmt.Println(err)
+// 	// 		}
+// 	// 		for _, value := range r {
+// 	// 			fmt.Println(value)
+// 	// 		}
+// 	// 	}
+// 	// 	notrification := UseNotification("./Open/" + DateTimeNowString())
+// 	// 	var dd Notification
+// 	// 	for _, value := range notrification {
+// 	// 		file, err := ioutil.ReadFile(value)
+// 	// 		if err != nil {
+// 	// 			fmt.Println(err)
+// 	// 		}
+// 	// 		xml.Unmarshal(file, &dd)
+// 	// 		fmt.Printf("%s - ИНН \t %s - КПП \n", dd.FcsNotificationEF.PurchaseResponsible.ResponsibleOrg.INN, dd.FcsNotificationEF.PurchaseResponsible.ResponsibleOrg.KPP)
+// 	// 	}
+// }
 
 // Создание директории
 func (f *FileInfo) createFolder(storeFiles string) string {
