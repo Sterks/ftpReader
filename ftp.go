@@ -12,14 +12,20 @@ import (
 )
 
 type FileInfo struct {
-	nameFile string
-	area     string
-	filepath string
-	size     int64
-	checkDir bool
-	modeTime time.Time
-	mode     os.FileMode
-	sys      interface{}
+	ARId          int64
+	nameFile      string
+	area          string
+	filepath      string
+	size          int64
+	checkDir      bool
+	modeTime      time.Time
+	mode          os.FileMode
+	sys           interface{}
+	hash          string
+	ext           string
+	unarch        string
+	saveFile      bool
+	localFilePath string
 }
 
 var infoFileMass []FileInfo
@@ -39,17 +45,33 @@ func main() {
 		res := FindHash(hash)
 		if res == false {
 			saveFile = true
-			NewFileInfo(value, hash, saveFile)
-			SaveFiles(connect, storeFiles, value)
+			unarch := "N"
+			localFilePath := SaveFiles(connect, storeFiles, value)
+			value.localFilePath = localFilePath
+			ext := FileExt(localFilePath)
+			NewFileInfo(value, hash, saveFile, ext, unarch)
 			fmt.Printf("%s - %d - %s\n", hash, value.size, value.filepath)
 		} else {
+			unarch := "N"
 			saveFile = false
-			NewFileInfo(value, hash, saveFile)
+			ext := ""
+			NewFileInfo(value, hash, saveFile, ext, unarch)
 			fmt.Printf("Запись в базе уже существует - %s - %s - %d\n", value.filepath, hash, value.size)
 		}
 	}
 	fmt.Println(len(t))
-	// UnArchive()
+	listNotOpen := FindNotUnArch()
+	channel := make(chan FileInfo)
+	for _, file := range listNotOpen {
+		dstFolder := "./Open"
+		r, err := UnArchive(file.localFilePath, dstFolder, channel)
+		if err != nil {
+			fmt.Println(err)
+		}
+		for _, value := range r {
+			fmt.Println(value)
+		}
+	}
 }
 
 func dateTimeNowString() string {

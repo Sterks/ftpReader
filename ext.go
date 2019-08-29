@@ -10,14 +10,21 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/secsy/goftp"
 )
 
 const connection string = "postgres://postgres:596run49@localhost/postgres?sslmode=disable"
 
+//Определить разрешение файла
+func FileExt(path string) string {
+	g := filepath.Ext(path)
+	return g
+}
+
 //Сохранение файлов на диск
-func SaveFiles(connect *goftp.Client, pathSave string, value FileInfo) {
+func SaveFiles(connect *goftp.Client, pathSave string, value FileInfo) string {
 	os.MkdirAll(pathSave+"/"+dateTimeNowString(), 0755)
 	pathLocalFile := pathSave + "/" + dateTimeNowString() + "/" + value.nameFile
 	fmt.Println(pathLocalFile)
@@ -30,6 +37,7 @@ func SaveFiles(connect *goftp.Client, pathSave string, value FileInfo) {
 	if err != nil {
 		fmt.Println(err)
 	}
+	return pathLocalFile
 
 }
 
@@ -47,15 +55,14 @@ func HashFiles(connect *goftp.Client, pathFile string, value FileInfo) string {
 }
 
 //Создание новой записи
-func NewFileInfo(value FileInfo, hash string, saveFile bool) {
+func NewFileInfo(value FileInfo, hash string, saveFile bool, ext string, unarch string) {
 	db, err := sql.Open("postgres", connection)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
-
-	sqlStatement := `insert into "ArchFiles" ("nameFile", "area", "filepath", "size", "modeTime", "hash", "saveFile") values ($1, $2, $3, $4, $5, $6, $7)`
-	_, err = db.Exec(sqlStatement, value.nameFile, value.area, value.filepath, value.size, value.modeTime, hash, saveFile)
+	sqlStatement := `insert into "ArchFiles" ("nameFile", "area", "filepath", "size", "modeTime", "hash", "saveFile", "ext", unarch, "localPath") values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+	_, err = db.Exec(sqlStatement, value.nameFile, value.area, value.filepath, value.size, value.modeTime, hash, saveFile, ext, unarch, value.localFilePath)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -91,32 +98,78 @@ func ListIndex() {
 	defer rows.Close()
 }
 
-func NeedFileOpen() {
+func FindNotUnArch() []*FileInfo {
 	db, err := sql.Open("postgres", connection)
 	if err != nil {
 		log.Fatal(err)
 	}
-	// db.QueryRow(`select * from \"ArchFiles\" where `)
+
+	rows, err := db.Query(`select * from "ArchFiles" where ext = '.zip' and unarch = 'N'`)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer rows.Close()
+
+	listFiles := make([]*FileInfo, 0)
+	for rows.Next() {
+		file := new(FileInfo)
+		err := rows.Scan(&file.ARId, &file.nameFile, &file.filepath, &file.size, &file.modeTime, &file.area, &file.hash, &file.saveFile, &file.ext, &file.unarch, &file.localFilePath)
+		if err != nil {
+			log.Fatal(err)
+		}
+		listFiles = append(listFiles, file)
+	}
+	if err = rows.Err(); err != nil {
+		log.Fatal(err)
+	}
+	return listFiles
 }
 
-func UnArchive(srcPath string, dstPasth, out chan string) {
+// func NeedFileOpen() {
+// 	// db, err := sql.Open("postgres", connection)
+// 	// if err != nil {
+// 	// 	log.Fatal(err)
+// 	// }
+// 	// db.QueryRow(`select * from \"ArchFiles\" where `)
+// }
+
+func UnArchive(srcPath string, dstPasth string, out chan FileInfo) ([]string, error) {
+	var filenames []string
 	file, err := zip.OpenReader(srcPath)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer file.Close()
 	for _, f := range file.File {
-		fmt.Printf("Contents of %s:\n", f.Name)
+		fpath := filepath.Join(dstPasth, f.Name)
+		filenames = append(filenames, fpath)
+		if f.FileInfo().IsDir() {
+			os.MkdirAll(fpath, os.ModePerm)
+			continue
+		}
+		if err = os.MkdirAll(filepath.Dir(fpath), os.ModePerm); err != nil {
+			return filenames, err
+		}
+
+		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+		if err != nil {
+			return filenames, err
+		}
+
 		rc, err := f.Open()
 		if err != nil {
-			log.Fatal(err)
+			return filenames, err
 		}
-		_, err = io.CopyN(os.Stdout, rc, 68)
-		if err != nil {
-			log.Fatal(err)
-		}
-		rc.Close()
-		fmt.Println()
-	}
 
+		_, err = io.Copy(outFile, rc)
+
+		// Close the file without defer to close before next iteration of loop
+		outFile.Close()
+		rc.Close()
+
+		if err != nil {
+			return filenames, err
+		}
+	}
+	return filenames, nil
 }
