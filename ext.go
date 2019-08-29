@@ -142,33 +142,34 @@ func UnArchive(srcPath string, dstPasth string, out chan FileInfo) ([]string, er
 	defer file.Close()
 	for _, f := range file.File {
 		fpath := filepath.Join(dstPasth, f.Name)
-		filenames = append(filenames, fpath)
-		if f.FileInfo().IsDir() {
-			os.MkdirAll(fpath, os.ModePerm)
-			continue
-		}
-		if err = os.MkdirAll(filepath.Dir(fpath), os.ModePerm); err != nil {
-			return filenames, err
-		}
+		if filepath.Ext(fpath) != ".sig" {
+			filenames = append(filenames, fpath)
+			if f.FileInfo().IsDir() {
+				os.MkdirAll(fpath, os.ModePerm)
+				continue
+			}
+			if err = os.MkdirAll(filepath.Dir(fpath), os.ModePerm); err != nil {
+				return filenames, err
+			}
+			outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+			if err != nil {
+				return filenames, err
+			}
 
-		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
-		if err != nil {
-			return filenames, err
-		}
+			rc, err := f.Open()
+			if err != nil {
+				return filenames, err
+			}
 
-		rc, err := f.Open()
-		if err != nil {
-			return filenames, err
-		}
+			_, err = io.Copy(outFile, rc)
 
-		_, err = io.Copy(outFile, rc)
+			// Close the file without defer to close before next iteration of loop
+			outFile.Close()
+			rc.Close()
 
-		// Close the file without defer to close before next iteration of loop
-		outFile.Close()
-		rc.Close()
-
-		if err != nil {
-			return filenames, err
+			if err != nil {
+				return filenames, err
+			}
 		}
 	}
 	return filenames, nil
