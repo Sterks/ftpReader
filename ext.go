@@ -52,7 +52,7 @@ func DateTimeNowString() string {
 }
 
 //Сохранение файлов на диск
-func SaveFiles(connect *goftp.Client, pathSave string, value FileInfo, c chan string) string {
+func SaveFiles(connect *goftp.Client, pathSave string, value FileInfo) string {
 	os.MkdirAll(pathSave+"/"+DateTimeNowString(), 0755)
 	pathLocalFile := pathSave + "/" + DateTimeNowString() + "/" + value.nameFile
 	fmt.Println(pathLocalFile)
@@ -65,10 +65,12 @@ func SaveFiles(connect *goftp.Client, pathSave string, value FileInfo, c chan st
 	if err != nil {
 		fmt.Println(err)
 	}
-	c <- pathLocalFile
-	if pathLocalFile == "" {
-		close(c)
-	}
+	// c <- pathLocalFile
+	// if pathLocalFile == "" {
+	// 	close(c)
+	// }
+	value.localFilePath = pathLocalFile
+	NewFileInfo(value, true, FileExt(pathLocalFile), "N")
 	return pathLocalFile
 }
 
@@ -86,14 +88,14 @@ func HashFiles(connect *goftp.Client, pathFile string, value FileInfo) string {
 }
 
 //Создание новой записи
-func NewFileInfo(value FileInfo, hash string, saveFile bool, ext string, unarch string) {
+func NewFileInfo(value FileInfo, saveFile bool, ext string, unarch string) {
 	db, err := sql.Open("postgres", connection)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
 	sqlStatement := `insert into "ArchFiles" ("nameFile", "area", "filepath", "size", "modeTime", "hash", "saveFile", "ext", unarch, "localPath") values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
-	_, err = db.Exec(sqlStatement, value.nameFile, value.area, value.filepath, value.size, value.modeTime, hash, saveFile, ext, unarch, value.localFilePath)
+	_, err = db.Exec(sqlStatement, value.nameFile, value.area, value.filepath, value.size, value.modeTime, value.hash, saveFile, ext, unarch, value.localFilePath)
 	if err != nil {
 		log.Fatal(err)
 	}

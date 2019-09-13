@@ -64,11 +64,15 @@ func mainProccess() {
 	c := make(chan string)
 	defer close(c)
 	for _, info := range listInfoFiles {
-		go SaveFiles(client, "./Files", info, c)
+		if FindHash(info.hash) == false {
+			SaveFiles(client, "./Files", info)
+		} else {
+			fmt.Printf("Запись в базе уже существует - %s - %s - %d\n", info.filepath, info.hash, info.size)
+		}
 	}
-	for i := 0; i < len(listInfoFiles); i++ {
-		<-c
-	}
+	// for i := 0; i < len(listInfoFiles); i++ {
+	// 	<-c
+	// }
 	fmt.Println(time.Since(start))
 	fmt.Println("Выполнение завершено ...")
 }
@@ -253,7 +257,7 @@ func connect() *goftp.Client {
 		User:               "free",
 		Password:           "free",
 		ConnectionsPerHost: 10,
-		Timeout:            2000 * time.Second,
+		// Timeout:            0 * time.Second,
 		//Logger:             os.Stderr,
 	}
 	ftp, err := goftp.DialConfig(config, "ftp.zakupki.gov.ru:21")
