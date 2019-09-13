@@ -52,7 +52,7 @@ func DateTimeNowString() string {
 }
 
 //Сохранение файлов на диск
-func SaveFiles(connect *goftp.Client, pathSave string, value FileInfo) string {
+func SaveFiles(connect *goftp.Client, pathSave string, value FileInfo, c chan string) string {
 	os.MkdirAll(pathSave+"/"+DateTimeNowString(), 0755)
 	pathLocalFile := pathSave + "/" + DateTimeNowString() + "/" + value.nameFile
 	fmt.Println(pathLocalFile)
@@ -61,12 +61,15 @@ func SaveFiles(connect *goftp.Client, pathSave string, value FileInfo) string {
 		fmt.Println(err)
 	}
 	defer filePath.Close()
-	connect.Retrieve(value.filepath, filePath)
+	err = connect.Retrieve(value.filepath, filePath)
 	if err != nil {
 		fmt.Println(err)
 	}
+	c <- pathLocalFile
+	if pathLocalFile == "" {
+		close(c)
+	}
 	return pathLocalFile
-
 }
 
 //Определяем Hash файла

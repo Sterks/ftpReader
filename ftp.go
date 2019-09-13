@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jasonlvhit/gocron"
 	_ "github.com/lib/pq"
 	"github.com/secsy/goftp"
 )
@@ -35,12 +36,17 @@ type FileInfo struct {
 	localFilePath string
 }
 
+type Waiter struct {
+}
+
 var err error
 
 func main() {
-	// gocron.Every().Minute().Do(mainProccess)
-	// <-gocron.Start()
-	mainProccess()
+	fmt.Println("Основной процесс запущен, через 2 мин запуститься задача")
+	gocron.Every(2).Minutes().Do(mainProccess)
+	<-gocron.Start()
+	fmt.Println("Основной процесс завершен")
+	// mainProccess()
 }
 
 func mainProccess() {
@@ -55,9 +61,14 @@ func mainProccess() {
 	to := time.Now()
 	listInfoFiles := GetFiles(client, from, to, "notifications", infoFileMass)
 	fmt.Println(len(listInfoFiles))
-	// for _, value := range infoFileMass {
-	// 	fmt.Println(value.hash, value.modeTime, value.nameFile, value.filepath, value.size)
-	// }
+	c := make(chan string)
+	defer close(c)
+	for _, info := range listInfoFiles {
+		go SaveFiles(client, "./Files", info, c)
+	}
+	for i := 0; i < len(listInfoFiles); i++ {
+		<-c
+	}
 	fmt.Println(time.Since(start))
 	fmt.Println("Выполнение завершено ...")
 }
@@ -90,6 +101,9 @@ func GetFiles(client *goftp.Client, from time.Time, to time.Time, typeDocum stri
 
 			buf := new(bytes.Buffer)
 			err = client.Retrieve(fullPath, buf)
+			if err != nil {
+				fmt.Println(err)
+			}
 			var hasher = sha256.New()
 			_, err = io.Copy(hasher, buf)
 			if err != nil {
@@ -104,11 +118,7 @@ func GetFiles(client *goftp.Client, from time.Time, to time.Time, typeDocum stri
 			infoFile.filepath = fullPath
 			hash := fmt.Sprintf("%s - %x", fullPath, hasher.Sum(nil))
 			fmt.Println(hash)
-
-			// ch <- infoFile
-
 			infoFileMassS = append(infoFileMassS, infoFile)
-			// }()
 			return nil
 		}, from, to)
 	}
