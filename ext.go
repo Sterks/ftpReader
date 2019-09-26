@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"crypto/md5"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"fmt"
@@ -20,7 +21,7 @@ import (
 
 const connection string = "postgres://postgres:596run49@localhost/postgres?sslmode=disable"
 
-/*Парсинг XML*/
+// UseNotification ...
 func UseNotification(pathFolder string) []string {
 	files, err := ioutil.ReadDir(pathFolder)
 	if err != nil {
@@ -38,7 +39,7 @@ func UseNotification(pathFolder string) []string {
 	return mass
 }
 
-//Определить разрешение файла
+//FileExt Определить разрешение файла
 func FileExt(path string) string {
 	g := filepath.Ext(path)
 	return g
@@ -70,11 +71,11 @@ func SaveFiles(connect *goftp.Client, pathSave string, value FileInfo) string {
 	// 	close(c)
 	// }
 	value.localFilePath = pathLocalFile
-	NewFileInfo(value, true, FileExt(pathLocalFile), "N")
+	NewFileInfo(value, true, FileExt(pathLocalFile))
 	return pathLocalFile
 }
 
-//Определяем Hash файла
+//HashFiles Определяем Hash файла
 func HashFiles(connect *goftp.Client, pathFile string, value FileInfo) string {
 	hasher := md5.New()
 	buf := new(bytes.Buffer)
@@ -87,21 +88,53 @@ func HashFiles(connect *goftp.Client, pathFile string, value FileInfo) string {
 	return hash
 }
 
-//Создание новой записи
-func NewFileInfo(value FileInfo, saveFile bool, ext string, unarch string) {
+//NewFileInfo Создание новой записи
+func NewFileInfo(value FileInfo, saveFile bool, ext string) {
 	db, err := sql.Open("postgres", connection)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
-	sqlStatement := `insert into "ArchFiles" ("nameFile", "area", "filepath", "size", "modeTime", "hash", "saveFile", "ext", unarch, "localPath") values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
-	_, err = db.Exec(sqlStatement, value.nameFile, value.area, value.filepath, value.size, value.modeTime, value.hash, saveFile, ext, unarch, value.localFilePath)
+
+	var TFId int
+	_ = db.QueryRow(`select "TF_Id" from "TypeFile" where "TF_Extension" = $1`, ext).Scan(&TFId)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	sqlStatement := `insert into "ArchFiles" 
+					("AR_Name", "AR_Area", "AR_Filepath", "AR_Size", "AR_ModeTime", "AR_Hash", "AR_SaveFile", "AR_Ext", "AR_LocalPath")
+					values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+	_, err = db.Exec(sqlStatement, value.nameFile, value.area, value.filepath, value.size, value.modeTime, value.hash, saveFile, TFId, value.localFilePath)
 	if err != nil {
 		log.Fatal(err)
 	}
 }
 
-//Найти запись
+// NewFileInfoOS ...
+func NewFileInfoOS(value *zip.File, fi FileInfo) {
+	db, err := sql.Open("postgres", connection)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	var TFId int
+	_ = db.QueryRow(`select "TF_Id" from "TypeFile" where "TF_Extension" = $1`, fi.ext).Scan(&TFId)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	sqlStatement := `insert into "ArchFiles"
+	("AR_Name", "AR_Size", "AR_ModeTime", "AR_Hash", "AR_Ext", "AR_LocalPath")
+	values ($1, $2, $3, $4, $5, $6)`
+	_, err = db.Exec(sqlStatement, fi.nameFile, fi.size, fi.modeTime, fi.hash, TFId, fi.localFilePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+//FindHash Найти запись
 func FindHash(hash string) bool {
 	db, err := sql.Open("postgres", connection)
 	if err != nil {
@@ -118,6 +151,7 @@ func FindHash(hash string) bool {
 	}
 }
 
+// ListIndex ...
 func ListIndex() {
 	db, err := sql.Open("postgres", connection)
 	if err != nil {
@@ -131,25 +165,29 @@ func ListIndex() {
 	defer rows.Close()
 }
 
-func FindNotUnArch() []*FileInfo {
+//FindNotUnArch Поиск по ID
+func FindNotUnArch() []*FileInfoSQL {
 	db, err := sql.Open("postgres", connection)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	rows, err := db.Query(`select * from "ArchFiles" where ext = '.zip' and unarch = 'N'`)
+	rows, err := db.Query(`select * from "ArchFiles" where "AR_Ext" = 1`)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer rows.Close()
 
-	listFiles := make([]*FileInfo, 0)
+	listFiles := make([]*FileInfoSQL, 0)
 	for rows.Next() {
-		file := new(FileInfo)
-		err := rows.Scan(&file.ARId, &file.nameFile, &file.filepath, &file.size, &file.modeTime, &file.area, &file.hash, &file.saveFile, &file.ext, &file.unarch, &file.localFilePath)
+		// var filesql *FileInfoSQL
+		file := new(FileInfoSQL)
+		err := rows.Scan(&file.ARId, &file.nameFile, &file.filepath, &file.size, &file.modeTime, &file.area, &file.hash, &file.saveFile,
+			&file.ext, &file.localFilePath, &file.arparent)
 		if err != nil {
 			log.Fatal(err)
 		}
+
 		listFiles = append(listFiles, file)
 	}
 	if err = rows.Err(); err != nil {
@@ -158,25 +196,31 @@ func FindNotUnArch() []*FileInfo {
 	return listFiles
 }
 
-// func NeedFileOpen() {
-// 	// db, err := sql.Open("postgres", connection)
-// 	// if err != nil {
-// 	// 	log.Fatal(err)
-// 	// }
-// 	// db.QueryRow(`select * from \"ArchFiles\" where `)
-// }
+// NewNullString ...
+func NewNullString(s string) sql.NullString {
+	if len(s) == 0 {
+		return sql.NullString{}
+	}
+	return sql.NullString{
+		String: s,
+		Valid:  true,
+	}
+}
 
-func UnArchive(srcPath string, dstPasth string, out chan FileInfo) ([]string, error) {
-	var filenames []string
+// UnArchive ...
+func UnArchive(srcPath string, dstPasth string) ([]FileInfo, error) {
+	var filenames []FileInfo
 	file, err := zip.OpenReader(srcPath)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer file.Close()
+	var fi FileInfo
 	for _, f := range file.File {
 		fpath := filepath.Join(dstPasth, f.Name)
+		// f := os.FileInfo(fpath)
 		if filepath.Ext(fpath) != ".sig" {
-			filenames = append(filenames, fpath)
+
 			if f.FileInfo().IsDir() {
 				os.MkdirAll(fpath, os.ModePerm)
 				continue
@@ -189,17 +233,32 @@ func UnArchive(srcPath string, dstPasth string, out chan FileInfo) ([]string, er
 				return filenames, err
 			}
 
+			h, err := f.Open()
+			l := sha256.New()
+			if _, err := io.Copy(l, h); err != nil {
+				log.Fatal(err)
+			}
+			// fmt.Printf("%x - %s\n", l.Sum(nil), f.Name)
+			fi.hash = hex.EncodeToString(l.Sum(nil))
+			fi.localFilePath = fpath
+			fi.nameFile = f.Name
+			fi.size = int64(f.UncompressedSize64)
+			fi.ext = filepath.Ext(fpath)
+			fi.modeTime = f.Modified
+			h.Close()
+
 			rc, err := f.Open()
 			if err != nil {
 				return filenames, err
 			}
+			defer rc.Close()
 
 			_, err = io.Copy(outFile, rc)
-
+			NewFileInfoOS(f, fi)
 			// Close the file without defer to close before next iteration of loop
 			outFile.Close()
 			rc.Close()
-
+			filenames = append(filenames, fi)
 			if err != nil {
 				return filenames, err
 			}
