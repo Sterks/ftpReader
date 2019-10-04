@@ -2,6 +2,7 @@ package main
 
 import "encoding/xml"
 
+// Export ...
 type Export struct {
 	XMLName               xml.Name `xml:"export"`
 	Text                  string   `xml:",chardata"`

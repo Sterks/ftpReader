@@ -89,12 +89,7 @@ func mainProccess() {
 	listNotArchive := FindNotUnArch()
 	openFile := "./Open/" + DateTimeNowString() + "/"
 	for _, value := range listNotArchive {
-		// fmt.Println(value.localFilePath.String)
-		listOpenFiles, err := UnArchive(value.localFilePath.String, openFile)
-		if err != nil {
-			log.Println(err)
-		}
-		fmt.Printf("Общее кол-во файлов - %d\n", len(listOpenFiles))
+		UnArchive(value.localFilePath.String, openFile)
 	}
 	fmt.Println(time.Since(start))
 	fmt.Println("Выполнение завершено ...")

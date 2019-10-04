@@ -45,14 +45,14 @@ func FileExt(path string) string {
 	return g
 }
 
-//Дата в формате
+//DateTimeNowString Дата в формате
 func DateTimeNowString() string {
 	t := time.Now().Local()
 	s := t.Format("2006-01-02")
 	return s
 }
 
-//Сохранение файлов на диск
+//SaveFiles Сохранение файлов на диск
 func SaveFiles(connect *goftp.Client, pathSave string, value FileInfo) string {
 	os.MkdirAll(pathSave+"/"+DateTimeNowString(), 0755)
 	pathLocalFile := pathSave + "/" + DateTimeNowString() + "/" + value.nameFile
@@ -134,6 +134,22 @@ func NewFileInfoOS(value *zip.File, fi FileInfo) {
 	}
 }
 
+// GetLastId ...
+func GetLastId() int64 {
+	db, err := sql.Open("postgres", connection)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+	var ARId int64
+	_ = db.QueryRow(`select "AR_Id" from "ArchFiles" order by "AR_Id" desc limit 1`).Scan(&ARId)
+	return ARId
+}
+
+func GetStringId() {
+	GetLastId()
+}
+
 //FindHash Найти запись
 func FindHash(hash string) bool {
 	db, err := sql.Open("postgres", connection)
@@ -142,12 +158,15 @@ func FindHash(hash string) bool {
 	}
 	defer db.Close()
 	var fiID int64
-	_ = db.QueryRow(`select "ARId" from "ArchFiles" where "hash" = $1`, hash).Scan(&fiID)
+	var check bool
+	_ = db.QueryRow(`select "AR_Id" from "ArchFiles" where "AR_Hash" = $1`, hash).Scan(&fiID)
 
 	if fiID > 0 {
-		return true
+		check = true
+		return check
 	} else {
-		return false
+		check = false
+		return check
 	}
 }
 
@@ -180,7 +199,6 @@ func FindNotUnArch() []*FileInfoSQL {
 
 	listFiles := make([]*FileInfoSQL, 0)
 	for rows.Next() {
-		// var filesql *FileInfoSQL
 		file := new(FileInfoSQL)
 		err := rows.Scan(&file.ARId, &file.nameFile, &file.filepath, &file.size, &file.modeTime, &file.area, &file.hash, &file.saveFile,
 			&file.ext, &file.localFilePath, &file.arparent)
@@ -208,7 +226,7 @@ func NewNullString(s string) sql.NullString {
 }
 
 // UnArchive ...
-func UnArchive(srcPath string, dstPasth string) ([]FileInfo, error) {
+func UnArchive(srcPath string, dstPasth string) {
 	var filenames []FileInfo
 	file, err := zip.OpenReader(srcPath)
 	if err != nil {
@@ -216,21 +234,23 @@ func UnArchive(srcPath string, dstPasth string) ([]FileInfo, error) {
 	}
 	defer file.Close()
 	var fi FileInfo
+	// wg := &sync.WaitGroup{}
 	for _, f := range file.File {
+		// wg.Add(1)
+		// go func(f *zip.File) {
 		fpath := filepath.Join(dstPasth, f.Name)
 		// f := os.FileInfo(fpath)
 		if filepath.Ext(fpath) != ".sig" {
 
 			if f.FileInfo().IsDir() {
 				os.MkdirAll(fpath, os.ModePerm)
-				continue
 			}
 			if err = os.MkdirAll(filepath.Dir(fpath), os.ModePerm); err != nil {
-				return filenames, err
+				log.Panic(err)
 			}
 			outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
 			if err != nil {
-				return filenames, err
+				log.Panic(err)
 			}
 
 			h, err := f.Open()
@@ -238,7 +258,7 @@ func UnArchive(srcPath string, dstPasth string) ([]FileInfo, error) {
 			if _, err := io.Copy(l, h); err != nil {
 				log.Fatal(err)
 			}
-			// fmt.Printf("%x - %s\n", l.Sum(nil), f.Name)
+			fmt.Printf("%x - %s\n", l.Sum(nil), f.Name)
 			fi.hash = hex.EncodeToString(l.Sum(nil))
 			fi.localFilePath = fpath
 			fi.nameFile = f.Name
@@ -249,7 +269,7 @@ func UnArchive(srcPath string, dstPasth string) ([]FileInfo, error) {
 
 			rc, err := f.Open()
 			if err != nil {
-				return filenames, err
+				log.Panic(err)
 			}
 			defer rc.Close()
 
@@ -259,10 +279,12 @@ func UnArchive(srcPath string, dstPasth string) ([]FileInfo, error) {
 			outFile.Close()
 			rc.Close()
 			filenames = append(filenames, fi)
-			if err != nil {
-				return filenames, err
-			}
+			// wg.Done()
 		}
+		//  else {
+		// 	wg.Done()
+		// }
+		// }(f)
 	}
-	return filenames, nil
+	// wg.Wait()
 }
