@@ -1,7 +1,11 @@
 version: '3'
 
-services:
-  ftp:
-    image: 9bfa0dd70db4
-    volumes:
-      - ./src:/mnt
+services: 
+  App:
+    image: ftpreader
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: app
+    ports:
+      - "8181:8181"

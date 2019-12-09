@@ -1,6 +1,15 @@
-FROM golang:onbuild
-RUN mkdir /app
-ADD . /app
-WORKDIR /app
-RUN go build -o ftp .
-CMD ["/app/ftp"]
+FROM golang:latest
+
+RUN mkdir /applications
+ENV GO111MODULE=on
+WORKDIR /applications
+
+COPY go.mod .
+COPY go.sum .
+RUN go mod download
+
+COPY . .
+
+RUN go build -o ftpReader
+EXPOSE 8181
+ENTRYPOINT ["/applications/ftpReader"]
