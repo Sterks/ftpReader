@@ -78,19 +78,19 @@ func MainProccess() {
 	to := time.Now()
 	listInfoFiles := GetFiles(client, from, to, "notifications", infoFileMass)
 	fmt.Println(len(listInfoFiles))
-	for _, info := range listInfoFiles {
-		if FindHash(info.hash) == false {
-			SaveFiles(client, "./Files", info)
-		} else {
-			fmt.Printf("Запись в базе уже существует - %s - %s - %d\n", info.filepath, info.hash, info.size)
-		}
-	}
+	// for _, info := range listInfoFiles {
+	// 	if FindHash(info.hash) == false {
+	// 		SaveFiles(client, "./Files", info)
+	// 	} else {
+	// 		fmt.Printf("Запись в базе уже существует - %s - %s - %d\n", info.filepath, info.hash, info.size)
+	// 	}
+	// }
 
-	listNotArchive := FindNotUnArch()
-	openFile := "./Open/" + DateTimeNowString() + "/"
-	for _, value := range listNotArchive {
-		UnArchive(value.localFilePath.String, openFile)
-	}
+	// listNotArchive := FindNotUnArch()
+	// openFile := "./Open/" + DateTimeNowString() + "/"
+	// for _, value := range listNotArchive {
+	// 	UnArchive(value.localFilePath.String, openFile)
+	// }
 	fmt.Println(time.Since(start))
 	fmt.Println("Выполнение завершено ...")
 }

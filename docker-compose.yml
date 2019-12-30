@@ -1,11 +1,27 @@
-version: '3'
+version: '3.7'
 
-services: 
-  App:
-    image: ftpreader
-    build:
+services:
+  app:
+    build: 
       context: .
-      dockerfile: Dockerfile
-    container_name: app
+      dockerfile: build/Dockerfile_app
     ports:
-      - "8181:8181"
+      - "8181:8181"  
+  Postgres:
+    image: postgres
+    volumes:
+    - postgres_data:/var/lib/postgresql/data/
+    restart: always
+    networks:
+      - db-network
+    environment:
+      - POSTGRES_USER=sonar
+      - POSTGRES_PASSWORD=sonar
+      - POSTGRES_DB=rxml
+    ports:
+      - "5432:5432"
+networks:
+  db-network:
+    driver: bridge
+volumes:
+  postgres_data:
